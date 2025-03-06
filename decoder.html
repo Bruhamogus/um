@@ -1,45 +1,68 @@
-from flask import Flask, request, jsonify
-import numpy as np
-import scipy.io.wavfile as wav
-from pydub import AudioSegment
-import os
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Decoder</title>
+</head>
+<body>
+    <h2>Upload an MP3 File to Decode</h2>
+    <input type="file" id="fileInput" accept="audio/mpeg">
+    <button onclick="decodeAudio()">Upload & Decode</button>
+    <p id="decodedText"></p>
 
-app = Flask(__name__)
+    <script>
+        async function decodeAudio() {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) {
+                alert('Please select a file first!');
+                return;
+            }
 
-def decode_wave(mp3_file):
-    """Decodes text from an MP3 file based on frequency encoding."""
-    temp_wav = "temp_decoded.wav"
-    audio = AudioSegment.from_mp3(mp3_file)
-    audio.export(temp_wav, format="wav")
-    
-    sample_rate, data = wav.read(temp_wav)
-    os.remove(temp_wav)
+            const file = fileInput.files[0];
+            const arrayBuffer = await file.arrayBuffer();
 
-    duration = 0.1  # Duration per character
-    segment_size = int(sample_rate * duration)
-    chars = []
-    
-    for i in range(0, len(data), segment_size):
-        segment = data[i:i+segment_size]
-        fft_freq = np.fft.fftfreq(len(segment), 1/sample_rate)
-        magnitude = np.abs(np.fft.fft(segment))
-        dominant_freq = abs(fft_freq[np.argmax(magnitude)])
-        char_code = int(dominant_freq / 10)
-        chars.append(chr(char_code))
-    
-    return "".join(chars)
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-@app.route('/decode', methods=['POST'])
-def decode_audio():
-    if 'file' not in request.files:
-        return "No file uploaded", 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return "No file selected", 400
-    
-    decoded_text = decode_wave(file)
-    return decoded_text
+            const channelData = audioBuffer.getChannelData(0); // Get left channel data
+            const sampleRate = audioBuffer.sampleRate;
+            const duration = 0.1; // 0.1s per character
+            const segmentSize = Math.floor(sampleRate * duration);
+            
+            let decodedText = "";
+            
+            for (let i = 0; i < channelData.length; i += segmentSize) {
+                const segment = channelData.slice(i, i + segmentSize);
+                const freq = analyzeFrequency(segment, sampleRate);
+                const charCode = Math.round(freq / 10);
+                if (charCode > 31 && charCode < 127) { // Printable ASCII range
+                    decodedText += String.fromCharCode(charCode);
+                }
+            }
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+            document.getElementById('decodedText').innerText = "Decoded Text: " + decodedText;
+        }
+
+        function analyzeFrequency(signal, sampleRate) {
+            const fftSize = 1024;
+            const real = new Float32Array(fftSize);
+            const imag = new Float32Array(fftSize);
+            const spectrum = new Float32Array(fftSize / 2);
+
+            for (let k = 0; k < fftSize / 2; k++) {
+                let sumReal = 0, sumImag = 0;
+                for (let n = 0; n < fftSize; n++) {
+                    const angle = (2 * Math.PI * k * n) / fftSize;
+                    sumReal += signal[n] * Math.cos(angle);
+                    sumImag -= signal[n] * Math.sin(angle);
+                }
+                spectrum[k] = Math.sqrt(sumReal ** 2 + sumImag ** 2);
+            }
+
+            const maxIndex = spectrum.indexOf(Math.max(...spectrum));
+            return (maxIndex * sampleRate) / fftSize;
+        }
+    </script>
+</body>
+</html>
